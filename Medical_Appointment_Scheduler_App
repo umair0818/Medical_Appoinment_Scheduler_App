@@ -1,0 +1,215 @@
+from kivy.app import App
+from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.properties import ObjectProperty
+from kivy.uix.textinput import TextInput
+from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.popup import Popup
+import firebase_admin
+from firebase_admin import credentials, db
+from kivy.clock import Clock
+import datetime
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import random
+from twilio.rest import Client
+import requests
+
+class LoginScreen(Screen):
+    def __init__(self, **kwargs):
+        super(LoginScreen, self).__init__(**kwargs)
+        layout = BoxLayout(orientation='vertical')
+
+        # Input fields for patient details
+        self.patient_name_input = TextInput(hint_text="Enter patient name", multiline=False)
+        self.patient_age_input = TextInput(hint_text="Enter patient age", multiline=False)
+        self.patient_email_input = TextInput(hint_text="Enter patient email", multiline=False)
+        self.patient_phone_input = TextInput(hint_text="Enter patient phone", multiline=False)
+        layout.add_widget(Label(text="Patient Name:"))
+        layout.add_widget(self.patient_name_input)
+        layout.add_widget(Label(text="Patient Age:"))
+        layout.add_widget(self.patient_age_input)
+        layout.add_widget(Label(text="Patient Email:"))
+        layout.add_widget(self.patient_email_input)
+        layout.add_widget(Label(text="Patient Phone:"))
+        layout.add_widget(self.patient_phone_input)
+
+        # Next button to move to the next screen
+        next_button = Button(text="Next", size_hint=(None, None), size=(100, 50), background_color="green")
+        next_button.bind(on_press=self.next_screen)
+        layout.add_widget(next_button)
+
+        self.add_widget(layout)
+
+    def next_screen(self, instance):
+        # Get input values
+        patient_name = self.patient_name_input.text
+        patient_age = self.patient_age_input.text
+        patient_email = self.patient_email_input.text
+        patient_phone = self.patient_phone_input.text
+
+        # Navigate to the AppointmentScreen and pass patient details
+        self.manager.current = "appointment"
+        self.manager.get_screen("appointment").set_patient_details(patient_name, patient_age, patient_email, patient_phone)
+
+class AppointmentScreen(Screen):
+    def __init__(self, **kwargs):
+        super(AppointmentScreen, self).__init__(**kwargs)
+        layout = BoxLayout(orientation='vertical')
+
+        # Input fields for appointment details
+        self.hospital_name_input=TextInput(hint_text="Enter the Hospital Name",multiline=False)
+        self.appointment_date_input = TextInput(hint_text="Enter appointment date (dd/mm/yyyy)", multiline=False)
+        self.appointment_time_input = TextInput(hint_text="Enter appointment time (hh:mm AM/PM)", multiline=False)
+        layout.add_widget(Label(text="Hospital Name :"))
+        layout.add_widget(self.hospital_name_input)
+        layout.add_widget(Label(text="Appointment Date:"))
+        layout.add_widget(self.appointment_date_input)
+        layout.add_widget(Label(text="Appointment Time:"))
+        layout.add_widget(self.appointment_time_input)
+
+        # Submit button to submit appointment details
+        submit_button = Button(text="Submit", size_hint=(None, None), size=(100, 50), background_color="green")
+        submit_button.bind(on_press=self.submit_appointment)
+        layout.add_widget(submit_button)
+        close_button = Button(text="Close App", size_hint=(None, None), size=(100, 40), background_color="red")
+        close_button.bind(on_press=self.close_app)
+        layout.add_widget(close_button)
+        self.add_widget(layout)
+
+    def set_patient_details(self, patient_name, patient_age, patient_email, patient_phone):
+        self.patient_name = patient_name
+        self.patient_age = patient_age
+        self.patient_email = patient_email
+        self.patient_phone = patient_phone
+
+    def submit_appointment(self, instance):
+        # Get input values
+        hospital_name = self.hospital_name_input.text
+        appointment_date = self.appointment_date_input.text
+        appointment_time = self.appointment_time_input.text
+        
+        try:
+            # Store appointment details in the database
+            appointment_ref = db.reference('appointments').push({
+                'patient_name': self.patient_name,
+                'patient_age': self.patient_age,
+                'patient_email': self.patient_email,
+                'patient_phone': self.patient_phone,
+                'hospital_name': hospital_name,
+                'appointment_date': appointment_date,
+                'appointment_time': appointment_time
+            })
+
+            # Schedule reminder
+            self.schedule_reminder(appointment_date, appointment_time, appointment_ref.key)
+
+            # Show success message
+            self.show_popup("Appointment Scheduled")
+        except Exception as e:
+            # Show error message
+            self.show_popup(f"Error: {str(e)}")
+
+    def close_app(self, instance):
+        # Close the app
+        App.get_running_app().stop()
+
+    def schedule_reminder(self, appointment_date, appointment_time, appointment_key):
+        # Convert appointment datetime to Python datetime object
+        appointment_datetime = datetime.datetime.strptime(f"{appointment_date} {appointment_time}", "%d/%m/%Y %H:%M %p")
+
+        # Get current datetime
+        current_datetime = datetime.datetime.now()
+
+        # Calculate time difference between current datetime and appointment datetime
+        time_difference = appointment_datetime - current_datetime
+
+        # Schedule reminder only if appointment datetime is in the future
+        if time_difference.total_seconds() > 0:
+            # Convert time difference to seconds
+            time_difference_seconds = time_difference.total_seconds()
+
+            # Schedule reminder using threading or other mechanisms
+            pass
+
+    def send_email_reminder(self, email, appointment_datetime, appointment_key):
+        sender_email = "xyk5e1@bloheyz.com"
+        
+        receiver_email = email
+        message = MIMEMultipart("alternative")
+        message["Subject"] = "Appointment Reminder"
+        message["From"] = sender_email
+        message["To"] = receiver_email
+
+        text = f"Your appointment is scheduled on {appointment_datetime}."
+        html = f"""\
+        <html>
+          <body>
+            <p>Your appointment is scheduled on {appointment_datetime}.</p>
+          </body>
+        </html>
+        """
+
+        part1 = MIMEText(text, "plain")
+        part2 = MIMEText(html, "html")
+
+        message.attach(part1)
+        message.attach(part2)
+
+        try:
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login(sender_email)
+                server.sendmail(
+                    sender_email, receiver_email, message.as_string()
+                )
+            print("Email reminder sent successfully!")
+        except Exception as e:
+            print(f"Error sending email reminder: {e}")
+
+    def send_sms_reminder(self, phone_number, appointment_datetime, appointment_key):
+        try:
+            # Generate random 6-digit verification code
+            verification_code = random.randint(100000, 999999)
+
+            # Use Twilio to send SMS reminder
+            # Make sure to replace placeholders with your Twilio credentials and trial phone number
+            account_sid = "AC45545456889"
+            auth_token = "daa2c"
+            twilio_number = "+136"
+
+            client = Client(account_sid, auth_token)
+
+            message_body = f"Your appointment is scheduled on {appointment_datetime}. Verification Code: {verification_code}"
+            message = client.messages.create(
+                body=message_body,
+                from_=twilio_number,
+                to=phone_number
+            )
+
+            print("SMS reminder sent successfully!")
+        except Exception as e:
+            print(f"Error sending SMS reminder: {e}")
+
+    def show_popup(self, message):
+        popup = Popup(title='Notification',
+                      content=Label(text=message),
+                      size_hint=(None, None), size=(400, 200))
+        popup.open()
+
+class Medical_Appoinment_Scheduler_App(App):
+    screen_manager = ObjectProperty(None)
+
+    def build(self):
+        self.screen_manager = ScreenManager()
+        self.screen_manager.add_widget(LoginScreen(name="login"))
+        self.screen_manager.add_widget(AppointmentScreen(name="appointment"))
+        return self.screen_manager
+
+if __name__ == "__main__":
+    cred = credentials.Certificate('C:/Users/ELCOT/Downloads/medicalschedularapp-firebase-adminsdk-jm45r-3532045bf0.json')
+    firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://medicalschedularapp-default-rtdb.firebaseio.com/'
+    })
+    Medical_Appoinment_Scheduler_App().run()
